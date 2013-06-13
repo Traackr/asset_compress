@@ -15,11 +15,11 @@ class AssetCompilerTest extends CakeTestCase {
 
 		AssetConfig::clearAllCachedKeys();
 		$this->config = AssetConfig::buildFromIniFile($testFile);
-		$this->config->paths('js', array(
+		$this->config->paths('js', null, array(
 			$this->_testFiles . 'js' . DS,
 			$this->_testFiles . 'js' . DS . '*',
 		));
-		$this->config->paths('css', array(
+		$this->config->paths('css', null, array(
 			$this->_testFiles . 'css' . DS,
 			$this->_testFiles . 'css' . DS . '*',
 		));
@@ -77,7 +77,7 @@ TEXT;
 			'View' => array($this->_testFiles . 'View' . DS)
 		));
 		$Config = AssetConfig::buildFromIniFile($this->_themeConfig);
-		$Config->paths('css', array(
+		$Config->paths('css', null, array(
 			$this->_pluginPath . 'Test' . DS . 'test_files' . DS . 'css' . DS . '**'
 		));
 		$Config->theme('blue');
@@ -92,12 +92,35 @@ TEXT;
 		$this->assertEquals($expected, $result);
 	}
 
+	public function testMultipleThemeGeneration() {
+		App::build(array(
+			'View' => array($this->_testFiles . 'View' . DS)
+		));
+		$Config = AssetConfig::buildFromIniFile($this->_themeConfig);
+		$Config->paths('css', null, array(
+			$this->_pluginPath . 'Test' . DS . 'test_files' . DS . 'css' . DS . '**'
+		));
+		$Config->theme('blue');
+		$Compiler = new AssetCompiler($Config);
+		// Generate the blue file.
+		$Compiler->generate('themed.css');
+
+		$Config->theme('red');
+		$result = $Compiler->generate('themed.css');
+		$expected = <<<TEXT
+body {
+	color: red !important;
+}
+TEXT;
+		$this->assertEquals($expected, $result, 'red should not contain blue.');
+	}
+
 	public function testCombineThemeFileWithNonTheme() {
 		App::build(array(
 			'View' => array($this->_testFiles . 'View' . DS)
 		));
 		$Config = AssetConfig::buildFromIniFile($this->_themeConfig);
-		$Config->paths('css', array(
+		$Config->paths('css', null, array(
 			$this->_pluginPath . 'Test' . DS . 'test_files' . DS . 'css' . DS . '**'
 		));
 		$Config->theme('red');
@@ -122,7 +145,7 @@ TEXT;
 		CakePlugin::load('TestAsset');
 
 		$Config = AssetConfig::buildFromIniFile($this->_pluginConfig);
-		$Config->paths('css', array(
+		$Config->paths('css', null, array(
 			$this->_pluginPath . 'Test' . DS . 'test_files' . DS . 'css' . DS . '**'
 		));
 		$Compiler = new AssetCompiler($Config);

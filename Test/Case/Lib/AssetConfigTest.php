@@ -79,10 +79,16 @@ class AssetConfigTest extends CakeTestCase {
 	}
 
 	public function testPaths() {
-		$this->config->paths('js', array('/path/to/files', 'WEBROOT/js'));
+		$this->config->paths('js', null, array('/path/to/files', 'WEBROOT/js'));
 		$result = $this->config->paths('js');
 		$result = str_replace('/', DS, $result);
-		$this->assertEquals(array(DS . 'path' . DS . 'to' . DS . 'files', WWW_ROOT . 'js'), $result);
+		$expected = array(DS . 'path' . DS . 'to' . DS . 'files', WWW_ROOT . 'js');
+		$this->assertEquals($expected, $result);
+
+		$result = $this->config->paths('js', 'libs.js');
+		$result = str_replace('/', DS, $result);
+		$expected[] = WWW_ROOT . 'js' . DS . 'libs' . DS . '*';
+		$this->assertEquals($expected, $result);
 	}
 
 	public function testAddTarget() {
@@ -214,6 +220,16 @@ class AssetConfigTest extends CakeTestCase {
 
 		$config = AssetConfig::buildFromIniFile($this->_themeConfig);
 		$this->assertTrue($config->isThemed('themed.css'));
+	}
+
+	public function testExists() {
+		$this->assertTrue($this->config->exists('libs.js'));
+		$this->assertFalse($this->config->exists('derped.js'));
+	}
+
+	public function testModifiedTime() {
+		$this->assertInternalType('integer', $this->config->modifiedTime());
+		$this->assertEquals(filemtime($this->testConfig), $this->config->modifiedTime());
 	}
 
 }

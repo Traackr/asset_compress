@@ -263,6 +263,7 @@ class AssetCompressHelper extends AppHelper {
  *
  * @param string $file A build target to include.
  * @param array $options An array of options for the stylesheet tag.
+ * @throws RuntimeException
  * @return A stylesheet tag
  */
 	public function css($file, $options = array()) {
@@ -275,7 +276,7 @@ class AssetCompressHelper extends AppHelper {
 		if (!empty($options['raw'])) {
 			unset($options['raw']);
 			$config = $this->config();
-			$scanner = new AssetScanner($config->paths('css'), $this->theme);
+			$scanner = new AssetScanner($config->paths('css', $file), $this->theme);
 			foreach ($buildFiles as $part) {
 				$part = $scanner->resolve($part, false);
 				$part = str_replace(DS, '/', $part);
@@ -301,6 +302,7 @@ class AssetCompressHelper extends AppHelper {
  *
  * @param string $file A build target to include.
  * @param array $options An array of options for the script tag.
+ * @throws RuntimeException
  * @return A script tag
  */
 	public function script($file, $options = array()) {
@@ -313,7 +315,7 @@ class AssetCompressHelper extends AppHelper {
 			$output = '';
 			unset($options['raw']);
 			$config = $this->config();
-			$scanner = new AssetScanner($config->paths('js'), $this->theme);
+			$scanner = new AssetScanner($config->paths('js', $file), $this->theme);
 			foreach ($buildFiles as $part) {
 				$part = $scanner->resolve($part, false);
 				$output .= $this->Html->script($part, $options);
@@ -357,14 +359,14 @@ class AssetCompressHelper extends AppHelper {
 	}
 
 /**
-* Get the build file name.
-*
-* Generates filenames that are intended for production use
-* with statically generated files.
-*
-* @param string $build The build being resolved.
-* @return string The resolved build name.
-*/
+ * Get the build file name.
+ *
+ * Generates filenames that are intended for production use
+ * with statically generated files.
+ *
+ * @param string $build The build being resolved.
+ * @return string The resolved build name.
+ */
 	protected function _getBuildName($build) {
 		$ext = $this->_Config->getExt($build);
 		$hash = $this->_getHashName($build, $ext);
@@ -451,4 +453,15 @@ class AssetCompressHelper extends AppHelper {
 		$defined = $this->_Config->files($target);
 		$this->_Config->files($target, array_merge($defined, (array)$files));
 	}
+
+/**
+ * Check if a build exists (is defined and have at least one file) in the ini file.
+ *
+ * @param string $file Name of the build that will be checked if exists.
+ * @return boolean True if the build file exists.
+ */
+	public function exists($file) {
+		return $this->_Config->exists($file);
+	}
+
 }

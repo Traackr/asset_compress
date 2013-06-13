@@ -40,6 +40,13 @@ class AssetConfig {
 	);
 
 /**
+ * The timestamp that configuration changed.
+ *
+ * @var integer
+ */
+	protected $_modifiedTime;
+
+/**
  * A hash of constants that can be expanded when reading ini files.
  *
  * @var array
@@ -65,10 +72,15 @@ class AssetConfig {
  * @param array $data Initial data set for the object.
  * @param array $additionalConstants  Additional constants that will be translated
  *    when parsing paths.
+ * @param int $modifiedTime The time configuration data changed.
  */
-	public function __construct(array $data = array(), array $additionalConstants = array()) {
+	public function __construct(array $data = array(), array $additionalConstants = array(), $modifiedTime = null) {
 		$this->_data = $data;
 		$this->constantMap = array_merge($this->constantMap, $additionalConstants);
+		if (!$modifiedTime) {
+			$modifiedTime = time();
+		}
+		$this->_modifiedTime = $modifiedTime;
 	}
 
 /**
@@ -88,15 +100,16 @@ class AssetConfig {
 			return $parsedConfig;
 		}
 
-		$contents = self::_readConfig($iniFile);
-		return self::_parseConfig($contents, $constants);
+		return self::_parseConfig($iniFile, $constants);
 	}
 
 /**
  * Clear the build timestamp file and the associated cache entry
  */
 	public static function clearBuildTimeStamp() {
+		// @codingStandardsIgnoreStart
 		@unlink(TMP . self::BUILD_TIME_FILE);
+		// @codingStandardsIgnoreEnd
 		self::clearCachedBuildTime();
 	}
 
@@ -137,6 +150,7 @@ class AssetConfig {
 		if (empty($filename) || !is_string($filename) || !file_exists($filename)) {
 			throw new RuntimeException(sprintf('Configuration file "%s" was not found.', $filename));
 		}
+
 		return parse_ini_file($filename, true);
 	}
 
@@ -144,10 +158,42 @@ class AssetConfig {
  * Transforms the config data into a more structured form
  *
  * @param array $contents Contents to build a config object from.
+ * @param array $constants Array of constants that will be mapped.
+ * @param int $modifiedTime The modified time of the config data.
  * @return AssetConfig
  */
-	protected static function _parseConfig($config, $constants) {
-		$AssetConfig = new AssetConfig(self::$_defaults, $constants);
+	protected static function _parseConfig($baseFile, $constants, $modifiedTime = null) {
+		if (!$modifiedTime && file_exists($baseFile)) {
+			$modifiedTime = filemtime($baseFile);
+		}
+
+		$AssetConfig = new AssetConfig(self::$_defaults, $constants, $modifiedTime);
+		self::_parseConfigFile($baseFile, $AssetConfig);
+
+		$plugins = CakePlugin::loaded();
+		foreach ($plugins as $plugin) {
+			if (file_exists(CakePlugin::path($plugin) . 'Config' . DS . 'asset_compress.ini')) {
+				self::_parseConfigFile(CakePlugin::path($plugin) . 'Config' . DS . 'asset_compress.ini', $AssetConfig, $plugin . '.');
+			}
+		}
+
+		if ($AssetConfig->general('cacheConfig')) {
+			Cache::write(self::CACHE_ASSET_CONFIG_KEY, $AssetConfig, self::CACHE_CONFIG);
+		}
+
+		return $AssetConfig;
+	}
+
+/**
+ * Reads a config file and applies it to the given config instance
+ *
+ * @param string $iniFile Contents to apply to the config instance.
+ * @param AssetConfig $AssetConfig The config instance instance we're applying this config file to.
+ * @param string $prefix Prefix for the target key
+ */
+	protected static function _parseConfigFile($iniFile, $AssetConfig, $prefix = '') {
+		$config = self::_readConfig($iniFile);
+
 		foreach ($config as $section => $values) {
 			if (in_array($section, self::$_extensionTypes)) {
 				// extension section, merge in the defaults.
@@ -176,14 +222,9 @@ class AssetConfig {
 				}
 
 				// must be a build target.
-				$AssetConfig->addTarget($key, $values);
+				$AssetConfig->addTarget($prefix . $key, $values);
 			}
 		}
-
-		if ($AssetConfig->general('cacheConfig')) {
-			Cache::write(self::CACHE_ASSET_CONFIG_KEY, $AssetConfig, self::CACHE_CONFIG);
-		}
-		return $AssetConfig;
 	}
 
 /**
@@ -237,7 +278,7 @@ class AssetConfig {
 
 /**
  * Set values into the config object, You can't modify targets, or filters
- * with this.  Use the appropriate methods for those settings.
+ * with this. Use the appropriate methods for those settings.
  *
  * @param string $path The path to set.
  * @param string $value The value to set.
@@ -367,19 +408,34 @@ class AssetConfig {
 
 /**
  * Get/set paths for an extension. Setting paths will replace
- * all existing paths. Its only intended for testing.
+ * global or per target existing paths. Its only intended for testing.
  *
  * @param string $ext Extension to get paths for.
+ * @param string $target A build target. If provided the target's paths (if any) will also be
+ *     returned.
+ * @param array $paths Paths to replace either the global or per target paths.
  * @return array An array of paths to search for assets on.
  */
-	public function paths($ext, $paths = null) {
+	public function paths($ext, $target = null, $paths = null) {
 		if ($paths === null) {
-			if (!empty($this->_data[$ext]['paths'])) {
-				return (array)$this->_data[$ext]['paths'];
+			if (empty($this->_data[$ext]['paths'])) {
+				$paths = array();
+			} else {
+				$paths = (array)$this->_data[$ext]['paths'];
 			}
-			return array();
+			if ($target !== null && !empty($this->_data[$ext][self::TARGETS][$target]['paths'])) {
+				$buildPaths = $this->_data[$ext][self::TARGETS][$target]['paths'];
+				$paths = array_merge($paths, $buildPaths);
+			}
+			return array_unique($paths);
 		}
-		$this->_data[$ext]['paths'] = array_map(array($this, '_replacePathConstants'), $paths);
+
+		$paths = array_map(array($this, '_replacePathConstants'), $paths);
+		if ($target === null) {
+			$this->_data[$ext]['paths'] = $paths;
+		} else {
+			$this->_data[$ext][self::TARGETS][$target]['paths'] = $paths;
+		}
 	}
 
 /**
@@ -400,13 +456,13 @@ class AssetConfig {
 	}
 
 /**
- * Get / set values from the General section.  This is preferred
+ * Get / set values from the General section. This is preferred
  * to using get()/set() as you don't run the risk of making a
  * mistake in General's casing.
  *
  * @param string $key The key to read/write
  * @param mixed $value The value to set.
- * @return mixed Null when writing.  Either a value or null when reading.
+ * @return mixed Null when writing. Either a value or null when reading.
  */
 	public function general($key, $value = null) {
 		if ($value === null) {
@@ -431,8 +487,8 @@ class AssetConfig {
 /**
  * Create a new build target.
  *
- * @param string $target Name of the target file.  The extension will be inferred based on the last extension.
- * @param array $config Config data for the target.  Should contain files, filters and theme key.
+ * @param string $target Name of the target file. The extension will be inferred based on the last extension.
+ * @param array $config Config data for the target. Should contain files, filters and theme key.
  * @param array $filters The filters for the build (deprecated)
  */
 	public function addTarget($target, array $config, $filters = array()) {
@@ -445,6 +501,9 @@ class AssetConfig {
 				'filters' => $filters,
 				'theme' => false
 			);
+		}
+		if (!empty($config['paths'])) {
+			$config['paths'] = array_map(array($this, '_replacePathConstants'), (array)$config['paths']);
 		}
 		$this->_data[$ext][self::TARGETS][$target] = $config;
 	}
@@ -482,6 +541,26 @@ class AssetConfig {
 		$exts = array_flip(array_keys($this->_data));
 		unset($exts[self::FILTERS], $exts[self::GENERAL]);
 		return array_keys($exts);
+	}
+
+/**
+ * Check if a build target exists.
+ *
+ * @param string $file Name of the build file to check.
+ * @return boolean Exists
+ */
+	public function exists($target) {
+		$ext = $this->getExt($target);
+		return !empty($this->_data[$ext][self::TARGETS][$target]);
+	}
+
+/**
+ * Get the modified time of the config object.
+ *
+ * @return integer
+ */
+	public function modifiedTime() {
+		return $this->_modifiedTime;
 	}
 
 }
